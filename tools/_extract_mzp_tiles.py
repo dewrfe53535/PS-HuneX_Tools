@@ -28,7 +28,7 @@ from struct import unpack, pack
 from subprocess import call
 from mzx.decomp_mzx0 import mzx0_decompress
 
-logger = logging.Logger('MZP')
+logger = logging.getLogger(__name__)
 
 
 # http://blog.flip-edesign.com/?p=23
@@ -57,21 +57,21 @@ def write_pngchunk_withcrc(f, type, data):
 
 
 """
-    color = 1 (palette used), 2 (color used), and 4 (alpha channel used). Valid values are 0, 2, 3, 4, and 6. 
+    color = 1 (palette used), 2 (color used), and 4 (alpha channel used). Valid values are 0, 2, 3, 4, and 6.
 
     Color    Allowed    Interpretation
     Type    Bit Depths
-   
+
     0       1,2,4,8,16  Each pixel is a grayscale sample.
-   
+
     2       8,16        Each pixel is an R,G,B triple.
-   
+
     3       1,2,4,8     Each pixel is a palette index;
                        a PLTE chunk must appear.
-   
+
     4       8,16        Each pixel is a grayscale sample,
                        followed by an alpha sample.
-   
+
     6       8,16        Each pixel is an R,G,B triple,
                        followed by an alpha sample.
 """
@@ -146,10 +146,10 @@ class MzpFile:
 
     def extract_desc(self):
         self.data.seek(self.entries_descriptors[0].real_offset)
-        self.width, self.height, self.tile_width, self.tile_height, self.tile_x_count, self.tile_y_count,\
+        self.width, self.height, self.tile_width, self.tile_height, self.tile_x_count, self.tile_y_count, \
             self.bmp_type, self.bmp_depth, self.tile_crop = unpack('<HHHHHHHBB', self.data.read(0x10))
         self.tile_size = self.tile_width * self.tile_height
-        if self.bmp_type not in [0x01, 0x03, 0x08, 0x0B]:
+        if self.bmp_type not in [0x01, 0x03, 0x08, 0x0B, 0x0C]:
             logger.error("Unknown type 0x{:02X}".format(self.bmp_type))
             call(["cmd", "/c", "pause"])
             sys.exit(1)
@@ -235,6 +235,9 @@ class MzpFile:
                 logger.error("Unknown depth 0x{:02X}".format(self.bmp_depth))
                 call(["cmd", "/c", "pause"])
                 sys.exit(1)
+        elif self.bmp_type == 0x0C:
+            if self.bmp_depth == 0x11:
+                self.bitmap_bpp = 24
         elif self.bmp_type == 0x03:  # 'PEH' 8bpp + palette
             logger.error("Unsupported type 0x{:02X} (PEH)".format(self.bmp_type))
             call(["cmd", "/c", "pause"])
@@ -290,6 +293,16 @@ class MzpFile:
                     tile_data += pack('BBBB', r + r_offset, g + g_offset, b + b_offset, a)
                 else:
                     tile_data += pack('BBB', r + r_offset, g + g_offset, b + b_offset)
+            dec_buf = tile_data
+        # HEP
+        elif self.bmp_type in [0x0C]:
+            tile_data = b''
+            dec_buf_size = len(dec_buf)
+            image_data = dec_buf[32:dec_buf_size - 1024]
+            image_palette = dec_buf[-1024:]
+            for i in image_data:
+                r, g, b, a = image_palette[int(i) * 4:int(i) * 4 + 4]
+                tile_data += pack('BBB', r, g, b)
             dec_buf = tile_data
         return dec_buf
 
